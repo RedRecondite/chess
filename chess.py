@@ -173,11 +173,11 @@ def fade_checkerboard_alpha_pixel(pixel_array, x, y, source_pixel, width, height
             dest_pixel[1] = 0
             dest_pixel[2] = 0
         
-        # Add 1/4 of source color and increase alpha
+        # Add 1/4 of source color and set alpha to consistent shadow level
         dest_pixel[0] = min(255, dest_pixel[0] + source_pixel[0] // 4)
         dest_pixel[1] = min(255, dest_pixel[1] + source_pixel[1] // 4)
         dest_pixel[2] = min(255, dest_pixel[2] + source_pixel[2] // 4)
-        dest_pixel[3] = min(255, dest_pixel[3] + 32)
+        dest_pixel[3] = ALPHA_LIMIT  # Always 128 for shadow pixels, regardless of solid adjacency
 
 
 def convert_checkerboard_to_alpha(image, transparency_color=0xffffff):
