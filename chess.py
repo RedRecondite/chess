@@ -153,7 +153,7 @@ def is_checkerboard_solid_shadow_pixel(pixel_array, x, y, width, height):
 def fade_checkerboard_alpha_pixel(pixel_array, x, y, source_pixel, width, height):
     """
     Fade a transparent pixel by adding color from adjacent shadow pixel.
-    
+
     Args:
         pixel_array: numpy array of RGBA pixels (will be modified)
         x, y: coordinates of pixel to fade
@@ -162,9 +162,9 @@ def fade_checkerboard_alpha_pixel(pixel_array, x, y, source_pixel, width, height
     """
     if x < 0 or x >= width or y < 0 or y >= height:
         return
-    
+
     dest_pixel = pixel_array[y, x]
-    
+
     # Only fade pixels that are currently transparent
     if dest_pixel[3] < ALPHA_LIMIT:
         # If fully transparent, set to black first
@@ -172,12 +172,28 @@ def fade_checkerboard_alpha_pixel(pixel_array, x, y, source_pixel, width, height
             dest_pixel[0] = 0
             dest_pixel[1] = 0
             dest_pixel[2] = 0
-        
-        # Add 1/4 of source color and increase alpha
+
+        # Check if this pixel is at the shadow edge (adjacent to pure transparency)
+        # or in the shadow interior (adjacent to solid/shadow pixels)
+        adjacent_transparent_count = 0
+        for dy, dx in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            nx, ny = x + dx, y + dy
+            if nx < 0 or nx >= width or ny < 0 or ny >= height:
+                adjacent_transparent_count += 1
+            elif pixel_array[ny, nx, 3] == 0:  # Purely transparent
+                adjacent_transparent_count += 1
+
+        # Add 1/4 of source color
         dest_pixel[0] = min(255, dest_pixel[0] + source_pixel[0] // 4)
         dest_pixel[1] = min(255, dest_pixel[1] + source_pixel[1] // 4)
         dest_pixel[2] = min(255, dest_pixel[2] + source_pixel[2] // 4)
-        dest_pixel[3] = min(255, dest_pixel[3] + 32)
+
+        # If at shadow edge (adjacent to pure transparency), use gradient
+        # Otherwise, set to full shadow alpha for consistent appearance
+        if adjacent_transparent_count > 0:
+            dest_pixel[3] = min(255, dest_pixel[3] + 32)  # Gradient at edges
+        else:
+            dest_pixel[3] = ALPHA_LIMIT  # Full shadow alpha in interior
 
 
 def convert_checkerboard_to_alpha(image, transparency_color=0xffffff):
