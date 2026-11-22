@@ -11,6 +11,8 @@ from matplotlib.collections import LineCollection  # noqa: E402
 from matplotlib.colors import to_rgb  # noqa: E402
 from matplotlib.patches import PathPatch, Rectangle  # noqa: E402
 from matplotlib.path import Path as MPath  # noqa: E402
+from matplotlib.text import Text  # noqa: E402
+from matplotlib.transforms import Bbox  # noqa: E402
 from scipy import ndimage  # noqa: E402
 
 PALETTES = {
@@ -228,43 +230,74 @@ def render(res, cfg, ctx, out_base):
     for (sx, sy) in ctx["start_xy"]:
         ax.scatter([sx], [sy], s=(0.42 * s) ** 2, color=PAPER, edgecolors=INK, linewidths=1.6 * lw, zorder=9)
         ax.scatter([sx], [sy], s=(0.18 * s) ** 2, color=INK, linewidths=0, zorder=10)
+    ls = float(P.get("landmark_scale", 1.0))
+    halo = 0.9 * s * ls  # marker diameter in points
     for lm in ctx["landmarks"]:
-        ax.scatter([lm["xy"][0]], [lm["xy"][1]], marker="D", s=(0.3 * s) ** 2, color=INK, edgecolors=PAPER,
-                   linewidths=1.2 * lw, zorder=9)
+        x_, y_ = lm["xy"]
+        ax.scatter([x_], [y_], s=(halo * 1.18) ** 2, color=INK, linewidths=0, zorder=11)
+        ax.scatter([x_], [y_], s=halo ** 2, color=PAPER, linewidths=0, zorder=11.5)
+        ax.scatter([x_], [y_], marker="D", s=(0.46 * s * ls) ** 2, color=INK, linewidths=0, zorder=12)
 
     # labels: starts first, then landmarks, then towns, each avoiding what is already placed
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
     taken = []
     inside = ax.get_window_extent(renderer)
+    px_per_pt = fig.dpi / 72
 
     def fits(bb):
         return (not any(bb.overlaps(o) for o in taken) and inside.contains(bb.x0, bb.y0)
                 and inside.contains(bb.x1, bb.y1))
+
+    def marker_box(xy, diameter_pt):
+        cx, cy = ax.transData.transform(xy)
+        r = diameter_pt / 2 * px_per_pt
+        return Bbox.from_extents(cx - r, cy - r, cx + r, cy + r)
+
+    for xy in ctx["start_xy"]:
+        taken.append(marker_box(xy, 0.42 * s))
+    for lm in ctx["landmarks"]:
+        taken.append(marker_box(lm["xy"], halo * 1.1))
 
     for (sx, sy), pin in zip(ctx["start_xy"], ctx["pin_names"]):
         tt = ax.text(sx, sy, "   " + pin, fontsize=0.62 * s, fontfamily=display, fontweight="semibold",
                      color=INK, va="center", ha="left", zorder=10)
         taken.append(tt.get_window_extent(renderer).expanded(1.1, 1.4))
 
-    off = 0.32 * s  # points
-    spots = [((off, 0), "left", "center"), ((-off, 0), "right", "center"),
-             ((0, off * 1.1), "center", "bottom"), ((0, -off * 1.1), "center", "top")]
+    # callout labels: a boxed name and time joined to the marker by a short leader line
+    fs_lm = 0.72 * s * ls
+    # candidate spots: close in first, then farther out along a leader line
+    dirs = [((1, 0), "left", "center"), ((-1, 0), "right", "center"), ((0, 1), "center", "bottom"),
+            ((0, -1), "center", "top"), ((0.75, 0.75), "left", "bottom"), ((-0.75, 0.75), "right", "bottom"),
+            ((0.75, -0.75), "left", "top"), ((-0.75, -0.75), "right", "top")]
+    spots = [((ux * r, uy * r), ha, va) for r in (halo * 0.9, halo * 2.2, halo * 3.6, halo * 5.2)
+             for (ux, uy), ha, va in dirs]
+    box = dict(boxstyle="round,pad=0.38,rounding_size=0.3", facecolor=INK, edgecolor=PAPER,
+               linewidth=1.0 * lw * ls)
+    leader = dict(arrowstyle="-", color=INK, linewidth=1.4 * lw * ls, shrinkA=0, shrinkB=halo * 0.55)
+
+    def callout(lm, dxy, ha, va):
+        return ax.annotate(f"{lm['name']}   {fmt_duration(lm['seconds'])}", lm["xy"], xytext=dxy,
+                           textcoords="offset points", ha=ha, va=va, fontsize=fs_lm, fontfamily=body,
+                           fontweight="semibold", color=PAPER, zorder=13, bbox=box, arrowprops=leader,
+                           annotation_clip=False)
+
+    pad = fs_lm * 0.5 * px_per_pt  # the box padding, which the text extent leaves out
     for lm in ctx["landmarks"]:
-        text = f"{lm['name']}  {fmt_duration(lm['seconds'])}"
         placed = None
-        for (dx, dy), ha, va in spots:
-            t_ = ax.annotate(text, lm["xy"], xytext=(dx, dy), textcoords="offset points", ha=ha, va=va,
-                             fontsize=0.5 * s, fontfamily=body, fontweight="semibold", color=INK, zorder=10)
-            bb = t_.get_window_extent(renderer).expanded(1.06, 1.3)
+        for dxy, ha, va in spots:
+            t_ = callout(lm, dxy, ha, va)
+            t_.update_positions(renderer)  # annotations only move to their offset when drawn
+            bb = Text.get_window_extent(t_, renderer)  # the label alone; the leader always touches its own badge
+            bb = Bbox.from_extents(bb.x0 - pad, bb.y0 - pad, bb.x1 + pad, bb.y1 + pad)
             if fits(bb):
                 placed = bb
                 break
             t_.remove()
         if placed is None:  # crowded: keep it to the right anyway
-            t_ = ax.annotate(text, lm["xy"], xytext=(off, 0), textcoords="offset points", ha="left", va="center",
-                             fontsize=0.5 * s, fontfamily=body, fontweight="semibold", color=INK, zorder=10)
-            placed = t_.get_window_extent(renderer)
+            t_ = callout(lm, spots[0][0], "left", "center")
+            t_.update_positions(renderer)
+            placed = Text.get_window_extent(t_, renderer)
         taken.append(placed)
 
     towns = []
@@ -341,8 +374,8 @@ def render(res, cfg, ctx, out_base):
         cx0 = m + leg_w + 0.05 * s
         fig.text(cx0 / W, top_f / H, "DRIVE TIMES", fontsize=0.5 * s, fontfamily=body, fontweight="semibold",
                  color=INK, va="top", ha="left")
-        fs = 0.5 * s
-        line_h = fs / 72 * 1.6
+        fs = 0.58 * s
+        line_h = fs / 72 * 1.55
         row_top = top_f - 0.016 * s
         rows = max(1, int((row_top - m * 0.9) / line_h))
         ncol = 1 if len(lms) <= rows else 2

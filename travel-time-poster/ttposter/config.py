@@ -40,6 +40,7 @@ DEFAULTS = {
         "label_min_population": "auto",
         "context_label_min_population": 250000,
         "draw_roads": "auto",
+        "landmark_scale": 1.0,
         "preview_dpi": 60,
         "png_dpi": 0,
     },

@@ -67,6 +67,7 @@ context_label_min_population = 250000
 draw_roads = "auto"        # or ["motorway", "primary", "secondary"], or false
 preview_dpi = 60
 png_dpi = 0                # set to 300 to also write a print-resolution PNG (large)
+landmark_scale = 1.0       # size of landmark badges and their labels
 
 [paths]
 data = "data"              # downloads and parsed road caches
