@@ -1,0 +1,61 @@
+# Drive-time poster settings. Every setting can be left out to use its default.
+# Command-line flags override these: python poster.py --start "Marquette, MI"
+
+# Where the drive starts. Any of these forms works:
+#   start = "Lansing, Michigan"                    a place name or address, looked up on OpenStreetMap
+#   start = [42.7325, -84.5555]                    latitude, longitude
+#   start = "42.7325, -84.5555"                    the same, as text
+#   start = ["Detroit, MI", "Grand Rapids, MI"]    several: each spot is colored by its nearest start
+start = "Lansing, Michigan"
+
+# Name printed on the poster. Leave empty to use the first part of the place name.
+start_label = ""
+
+[region]
+# The state whose outline frames the poster and gets full-strength color.
+focus = "Michigan"
+# Road data to route on (Geofabrik extracts, downloaded once). Neighbors matter: from southwest Michigan,
+# the fastest way to parts of the Upper Peninsula runs through Chicago and Wisconsin.
+# Add "ontario" to allow routes through Canada. A path to a local .osm.pbf file also works.
+routing = ["michigan", "wisconsin", "illinois", "indiana", "ohio"]
+# Extra space around the focus state, in km.
+margin_km = 20
+
+[travel]
+band_minutes = 30
+# Heavier line every this many hours.
+major_every_hours = 2
+# "auto" stops at the time needed to reach the farthest corner of the focus state.
+max_hours = "auto"
+# Speed for the last stretch between the mapped roads and any spot on the map.
+local_speed_kmh = 30
+# Land farther than this from any public road gets no color (lakes never do).
+gap_km = 3
+# Car ferries only ("car"), every ferry ("all"), or none ("none").
+ferries = "car"
+ferry_wait_minutes = 30
+# Road types used for routing, and road types that count as "a road" for the gaps.
+route_classes = ["motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link",
+                 "secondary", "secondary_link", "tertiary", "tertiary_link", "unclassified", "residential", "road"]
+gap_classes = ["motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential",
+               "living_street", "road"]
+
+[poster]
+width_in = 24
+height_in = 36
+# {start} is replaced with the start label, {focus} with the focus state, {band} with band_minutes.
+title = "Drive Time from {start}"
+subtitle = "Every {band} minutes of driving across {focus}"
+palette = "ember"          # ember, tide or heath
+outside_opacity = 0.35     # color strength outside the focus state
+cell_m = 500               # grid size; 500 m is finer than a 24-inch print can show
+smooth_cells = 1.2         # softens band edges
+label_min_population = 8000
+context_label_min_population = 250000
+draw_highways = true
+preview_dpi = 60
+png_dpi = 0                # set to 300 to also write a print-resolution PNG (large)
+
+[paths]
+data = "data"              # downloads and parsed road caches
+out = "out"
