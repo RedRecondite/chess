@@ -9,7 +9,7 @@ from scipy.sparse.csgraph import dijkstra
 from scipy.spatial import cKDTree
 
 from .geo import haversine
-from .osm import CLASSES, CLS, F_CAR_FERRY, F_FLAT, F_PASSENGER_FERRY
+from .osm import CLASSES, CLS, F_FLAT
 
 # Free-flow driving speeds in km/h when a road has no maxspeed tag.
 DEFAULT_KMH = {
@@ -67,7 +67,7 @@ def _segments(R):
     return i, way_of[i]
 
 
-def compute(R, cfg, proj, grid, land, focus_mask, starts, log=print):
+def compute(R, cfg, proj, grid, land, focus_mask, starts, probes=(), log=print):
     t0 = time.time()
     tr = cfg["travel"]
     local_mps = tr["local_speed_kmh"] / 3.6
@@ -91,9 +91,7 @@ def compute(R, cfg, proj, grid, land, focus_mask, starts, log=print):
         if c in CLS:
             route_cls[CLS[c]] = True
     is_ferry = cls == CLS["ferry"]
-    ferry_ok = {"car": (flags & F_CAR_FERRY) > 0, "all": (flags & (F_CAR_FERRY | F_PASSENGER_FERRY)) > 0,
-                "none": np.zeros(len(cls), bool)}[tr["ferries"]]
-    routable = (route_cls[cls] & ~is_ferry) | (is_ferry & ferry_ok)
+    routable = route_cls[cls] & ~is_ferry   # ferries are never used: no schedules or waits to guess at
     gap_cls = np.zeros(len(CLASSES), bool)
     for c in tr["gap_classes"]:
         if c in CLS:
@@ -104,11 +102,7 @@ def compute(R, cfg, proj, grid, land, focus_mask, starts, log=print):
     dflt = np.array([DEFAULT_KMH[c] for c in CLASSES])[cls]
     ms = R["maxspeed"][way].astype(np.float64)
     kmh = np.where(ms > 0, np.minimum(ms * 0.9, dflt * 1.4), dflt)
-    kmh = np.where(is_ferry, DEFAULT_KMH["ferry"], kmh)
     t = seg_m / (kmh / 3.6)
-    if is_ferry.any():  # spread the boarding wait over the ferry route's segments
-        nseg = np.bincount(way[is_ferry], minlength=len(R["cls"]))
-        t = t + np.where(is_ferry, tr["ferry_wait_minutes"] * 60.0 / np.maximum(nseg[way], 1), 0.0)
 
     sel = routable
     a_r, b_r, t_r = a[sel], b[sel], t[sel]
@@ -154,6 +148,18 @@ def compute(R, cfg, proj, grid, land, focus_mask, starts, log=print):
                    shape=(N + 1, N + 1))
     dnode = dijkstra(G, directed=True, indices=N)[:N]
     log(f"Drive times to {np.isfinite(dnode).sum():,} road nodes ({time.time() - t0:.0f} s)")
+
+    # drive time to each landmark: best of the nearby road nodes plus the last stretch on foot-ish speed
+    probe_s = []
+    for lat, lon in probes:
+        px_, py_ = proj(lon, lat)
+        dd, ii = tree.query([float(px_), float(py_)], k=12, distance_upper_bound=15000)
+        ok = np.isfinite(dd)
+        best = np.min(dnode[cand[ii[ok]]] + dd[ok] / local_mps) if ok.any() else np.inf
+        for slat, slon in starts:  # a landmark right next to a start
+            sx2, sy2 = proj(slon, slat)
+            best = min(best, float(np.hypot(px_ - sx2, py_ - sy2)) / local_mps)
+        probe_s.append(float(best))
 
     # ---------- distance from any road (for the gaps) ----------
     def sample(seg_mask):
@@ -221,10 +227,14 @@ def compute(R, cfg, proj, grid, land, focus_mask, starts, log=print):
     reach = np.isfinite(T) & focus_mask
     far = float(T[reach].max()) if reach.any() else 0.0
 
-    hw = sel & np.isin(cls, [CLS["motorway"], CLS["trunk"]])
-    return {
-        "T": T, "valid": valid, "far_s": far,
-        "highways": np.column_stack([nx[a[hw]], ny[a[hw]], nx[b[hw]], ny[b[hw]]]),
-        "ferries": np.column_stack([nx[a[sel & is_ferry]], ny[a[sel & is_ferry]],
-                                    nx[b[sel & is_ferry]], ny[b[sel & is_ferry]]]),
-    }
+    # roads to draw, by weight, limited to the frame
+    fx0, fx1 = grid.x0, grid.x0 + grid.cols * cell
+    fy0, fy1 = grid.ytop - grid.rows * cell, grid.ytop
+    inside = (np.maximum(nx[a], nx[b]) >= fx0) & (np.minimum(nx[a], nx[b]) <= fx1) & \
+             (np.maximum(ny[a], ny[b]) >= fy0) & (np.minimum(ny[a], ny[b]) <= fy1)
+    roads = {}
+    for name, group in (("motorway", ["motorway", "trunk"]), ("primary", ["primary"]),
+                        ("secondary", ["secondary", "tertiary"])):
+        m = inside & np.isin(cls, [CLS[g] for g in group])
+        roads[name] = np.column_stack([nx[a[m]], ny[a[m]], nx[b[m]], ny[b[m]]])
+    return {"T": T, "valid": valid, "far_s": far, "roads": roads, "probe_s": probe_s}
