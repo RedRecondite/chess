@@ -1,7 +1,10 @@
 """Settings: defaults, the TOML file, and command-line overrides."""
 import copy
 import re
-import tomllib
+try:
+    import tomllib  # Python 3.11+
+except ModuleNotFoundError:  # Python 3.9/3.10
+    import tomli as tomllib
 from pathlib import Path
 
 DEFAULTS = {

@@ -8,7 +8,7 @@ vector PDF sized for a poster (24 × 36 in by default) plus a PNG preview.
 
 ## Setup
 
-Python 3.11 or newer.
+Python 3.10 or newer (3.11+ recommended).
 
 ```bash
 cd travel-time-poster

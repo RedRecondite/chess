@@ -1,4 +1,6 @@
 """What the map shows (a state, a county, a place, a box, or the landmarks) and which road extracts it needs."""
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass
 

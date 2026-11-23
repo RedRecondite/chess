@@ -21,6 +21,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ttposter import config, draw, geo, network, osm, sources, view as views  # noqa: E402
 
 log = sources.log
+for _stream in (sys.stdout, sys.stderr):  # old Windows consoles can't print "–", "×" or "…"
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 
 def slug(text):
