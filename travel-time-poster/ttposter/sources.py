@@ -1,4 +1,5 @@
 """Downloads (road extracts, boundaries, lakes, fonts) and place-name lookup, all cached under the data folder."""
+import http.client
 import json
 import re
 import shutil
@@ -86,6 +87,30 @@ def download(url, dest, quiet=False):
     return dest
 
 
+GEOFABRIK_INDEX = GEOFABRIK + "index-v1-nogeom.json"
+
+
+def geofabrik_url(path, data_dir):
+    """The download link for a Geofabrik region path such as 'north-america/us/michigan'.
+
+    Geofabrik's own index is the authority (its file layout has changed before); if it can't be read,
+    fall back to the current layout, where each region's files sit in a folder named after it.
+    """
+    name = path.rsplit("/", 1)[-1]
+    idx = Path(data_dir) / "osm" / "geofabrik-index.json"
+    try:
+        if idx.exists() and time.time() - idx.stat().st_mtime > 7 * 86400:
+            idx.unlink()  # refresh weekly
+        download(GEOFABRIK_INDEX, idx, quiet=True)
+        for f in json.loads(idx.read_text(encoding="utf-8")).get("features", []):
+            pbf = (f.get("properties", {}).get("urls") or {}).get("pbf", "")
+            if f"/{path}/" in pbf or pbf.endswith(f"/{path}-latest.osm.pbf"):
+                return pbf
+    except Exception as e:  # noqa: BLE001 - any trouble with the index: use the known layout
+        log(f"  (Geofabrik index unavailable: {e}; guessing the download link)")
+    return f"{GEOFABRIK}{path}/{name}-latest.osm.pbf"
+
+
 def region_pbf(name, data_dir):
     """A state or province name, a Geofabrik path like 'north-america/us/ohio', or a local .osm.pbf file."""
     p = Path(name).expanduser()
@@ -93,12 +118,23 @@ def region_pbf(name, data_dir):
         if not p.exists():
             raise SystemExit(f"Road file not found: {p}")
         return p
-    path = region_path(name) or (name.strip().lower() if "/" in name else None)
+    path = region_path(name) or (name.strip().lower().strip("/") if "/" in name else None)
     if not path:
         raise SystemExit(f"Unknown region {name!r}. Use a U.S. state or Canadian province name, "
                          "a Geofabrik path such as 'europe/germany/bayern', or a local .osm.pbf file.")
     fname = path.split("/")[-1] + "-latest.osm.pbf"
-    return download(GEOFABRIK + path + "-latest.osm.pbf", Path(data_dir) / "osm" / fname)
+    dest = Path(data_dir) / "osm" / fname
+    if dest.exists() and dest.stat().st_size > 0:
+        return dest
+    url = geofabrik_url(path, data_dir)
+    try:
+        return download(url, dest)
+    except (OSError, http.client.HTTPException) as e:
+        raise SystemExit(
+            f"Couldn't download the road data for {name} ({e}).\n"
+            f"  Tried: {url}\n"
+            f"  You can download it yourself from https://download.geofabrik.de/{path}.html (the .osm.pbf file)\n"
+            f"  and save it as {dest}, then run again.")
 
 
 def boundary_files(data_dir):
