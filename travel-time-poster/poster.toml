@@ -1,0 +1,74 @@
+# Drive-time poster settings. Every setting can be left out to use its default.
+# Command-line flags override these: python poster.py --start "Marquette, MI" --view "Kent County, Michigan"
+
+# Where the drive starts. Any of these forms works:
+#   start = "Lansing, Michigan"                    a place name or address, looked up on OpenStreetMap
+#   start = [42.7325, -84.5555]                    latitude, longitude (never sent anywhere)
+#   start = ["Detroit, MI", "Grand Rapids, MI"]    several: each spot is colored by its nearest start
+start = "Lansing, Michigan"
+
+# Name printed on the poster. Leave empty to use the first part of the place name.
+start_label = ""
+
+# Places to mark on the map, each with its drive time printed beside it and listed under the legend.
+# "at" takes the same forms as start. Add as many as you like; copy a block for each one.
+# [[landmarks]]
+# name = "Grandma's"
+# at = "Holland, Michigan"
+#
+# [[landmarks]]
+# name = "The cabin"
+# at = [44.9512, -85.2047]
+
+[view]
+# What the map shows:
+#   area = "Michigan"                    a U.S. state (name or two-letter code)
+#   area = "Kent County, Michigan"       a county (or parish/borough)
+#   area = "Grand Rapids, Michigan"      any other place: its area on OpenStreetMap, at least 20 km across
+#   area = "landmarks"                   zoom to fit the start point(s) and every landmark
+#   area = [42.7, -86.0, 43.3, -85.2]    a box: south, west, north, east
+# A state or county is drawn at full color with its surroundings faded; the other kinds color everything.
+area = "Michigan"
+# Space around the area in km, or "auto".
+margin_km = "auto"
+
+[routing]
+# Road data to download (Geofabrik extracts, once each). "auto" picks every state near the view, the start
+# and the landmarks, and the states between them. Or list them: ["michigan", "ohio"], a Geofabrik path such
+# as "europe/germany/bayern", or a local .osm.pbf file.
+regions = "auto"
+# Allow routes through Canada (adds Ontario etc. when nearby). Ferries are never used.
+include_canada = false
+
+[travel]
+# "auto" picks 5, 10, 15, 30 or 60 minutes so the map has at most about 26 bands.
+band_minutes = "auto"
+# Heavier line every this many minutes ("auto": about every fourth band).
+major_every_minutes = "auto"
+# "auto" stops at the farthest point on the map (or the farthest landmark).
+max_hours = "auto"
+# Speed for the last stretch between the mapped roads and any spot on the map.
+local_speed_kmh = 30
+# Land farther than this from any public road gets no color (lakes never do).
+gap_km = 3
+
+[poster]
+width_in = 24
+height_in = 36
+# {start} is the start label, {view} the area's name, {band} the band width in minutes.
+title = "Drive Time from {start}"
+subtitle = "auto"          # e.g. "Every 30 minutes of driving across Michigan"
+palette = "ember"          # ember, tide or heath
+outside_opacity = 0.35     # color strength outside the state or county being shown
+cell_m = "auto"            # grid size; auto keeps about 1,600 cells across the map
+smooth_cells = 1.2         # softens band edges
+label_min_population = "auto"   # smallest town to label; auto scales with the map area
+context_label_min_population = 250000
+draw_roads = "auto"        # or ["motorway", "primary", "secondary"], or false
+preview_dpi = 60
+png_dpi = 0                # set to 300 to also write a print-resolution PNG (large)
+landmark_scale = 1.0       # size of landmark badges and their labels
+
+[paths]
+data = "data"              # downloads and parsed road caches
+out = "out"

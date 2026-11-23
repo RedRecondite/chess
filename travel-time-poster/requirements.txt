@@ -1,0 +1,7 @@
+numpy>=1.25
+scipy>=1.11
+matplotlib>=3.8
+pillow>=10
+pyshp>=2.3
+osmium>=4.0
+tomli>=2.0; python_version < "3.11"

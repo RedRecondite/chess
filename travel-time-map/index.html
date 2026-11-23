@@ -1,0 +1,1286 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Arrival Bands</title>
+<meta name="description" content="Travel-time bands from any start point, built from OpenStreetMap roads, water and terrain.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+/* Layout: full-bleed map, one floating instrument panel (bottom sheet on phones), legend strip inside the panel. */
+:root {
+  --ink: #18202b;
+  --ink-soft: #4f5b69;
+  --paper: #f6f7f5;
+  --panel: rgba(250, 251, 249, 0.92);
+  --rule: rgba(24, 32, 43, 0.12);
+  --accent: #d9542f;
+  --accent-ink: #ffffff;
+  --chip: rgba(24, 32, 43, 0.06);
+  --shadow: 0 10px 40px rgba(20, 28, 40, 0.18), 0 1px 3px rgba(20, 28, 40, 0.12);
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ink: #e8ecef; --ink-soft: #9aa6b2; --paper: #11151b; --panel: rgba(22, 27, 34, 0.9);
+    --rule: rgba(232, 236, 239, 0.12); --accent: #f07a4a; --accent-ink: #1a0e08;
+    --chip: rgba(232, 236, 239, 0.07); --shadow: 0 10px 40px rgba(0,0,0,0.5), 0 1px 3px rgba(0,0,0,0.4);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --ink: #e8ecef; --ink-soft: #9aa6b2; --paper: #11151b; --panel: rgba(22, 27, 34, 0.9);
+  --rule: rgba(232, 236, 239, 0.12); --accent: #f07a4a; --accent-ink: #1a0e08;
+  --chip: rgba(232, 236, 239, 0.07); --shadow: 0 10px 40px rgba(0,0,0,0.5), 0 1px 3px rgba(0,0,0,0.4);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--paper); color: var(--ink); font: 14px/1.45 var(--font-body); }
+#map { position: fixed; inset: 0; background: var(--paper); }
+.leaflet-container { font-family: var(--font-body); background: var(--paper); }
+
+.panel {
+  position: fixed; z-index: 1000;
+  top: max(16px, env(safe-area-inset-top, 0px)); left: max(16px, env(safe-area-inset-left, 0px));
+  width: 330px; max-height: calc(100% - 32px); overflow: auto;
+  background: var(--panel); backdrop-filter: blur(12px) saturate(1.2); -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  border: 1px solid var(--rule); border-radius: 14px; box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: 14px; padding: 16px;
+}
+.brand { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.brand h1 {
+  margin: 0; font-family: var(--font-display); font-weight: 800; font-stretch: 72%;
+  font-size: 26px; letter-spacing: 0.01em; text-transform: uppercase; line-height: 1;
+}
+.brand .collapse { background: none; border: 0; color: var(--ink-soft); font: 500 12px var(--font-data); cursor: pointer; padding: 4px; }
+.lede { margin: -6px 0 0; color: var(--ink-soft); font-size: 13px; }
+
+.search { display: flex; gap: 6px; }
+.search input { flex: 1; min-width: 0; }
+input[type="text"], select {
+  font: inherit; color: var(--ink); background: var(--chip); border: 1px solid var(--rule);
+  border-radius: 8px; padding: 7px 9px;
+}
+select { padding-right: 4px; }
+input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.label { font: 500 11px var(--font-data); text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-soft); }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.row > * { min-width: 0; }
+
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); background: var(--chip); border: 1px solid var(--rule); border-radius: 9px; padding: 3px; gap: 3px; }
+.seg button {
+  font: 600 13px var(--font-body); color: var(--ink-soft); background: transparent; border: 0;
+  border-radius: 6px; padding: 7px 0; cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+
+.range { display: flex; align-items: center; gap: 10px; }
+.range input { flex: 1; min-width: 0; accent-color: var(--accent); }
+.range output { font: 500 12px var(--font-data); min-width: 64px; text-align: right; font-variant-numeric: tabular-nums; }
+.check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; cursor: pointer; }
+.check input { accent-color: var(--accent); margin-top: 3px; }
+.note { font-size: 12px; color: var(--ink-soft); }
+
+.actions { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.btn {
+  font: 700 14px var(--font-display); font-stretch: 85%; letter-spacing: 0.04em; text-transform: uppercase;
+  border-radius: 9px; padding: 10px 14px; cursor: pointer; border: 1px solid var(--rule);
+  background: var(--chip); color: var(--ink);
+}
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.btn:disabled { opacity: 0.5; cursor: default; }
+
+.status { display: flex; flex-direction: column; gap: 6px; }
+.status-text { font: 12px var(--font-data); color: var(--ink-soft); min-height: 1.4em; }
+.status-text.error { color: var(--accent); }
+.bar { height: 3px; background: var(--chip); border-radius: 2px; overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0%; background: var(--accent); transition: width 0.25s ease; }
+
+.legend { display: flex; flex-direction: column; gap: 4px; }
+.legend-strip { display: flex; height: 14px; border-radius: 3px; overflow: hidden; border: 1px solid var(--rule); }
+.legend-strip > span { flex: 1; }
+.legend-ticks { position: relative; height: 14px; font: 10px var(--font-data); color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.legend-ticks > span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.legend-ticks > span:first-child { transform: none; }
+.legend-ticks > span:last-child { transform: translateX(-100%); }
+
+.palettes { display: flex; gap: 6px; flex-wrap: wrap; }
+.palettes button { border: 2px solid transparent; border-radius: 7px; padding: 2px; background: none; cursor: pointer; }
+.palettes button[aria-pressed="true"] { border-color: var(--ink); }
+.palettes canvas { display: block; width: 64px; height: 14px; border-radius: 4px; }
+
+details.more { border-top: 1px solid var(--rule); padding-top: 10px; }
+details.more summary { cursor: pointer; font: 500 11px var(--font-data); text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-soft); list-style: none; }
+details.more summary::-webkit-details-marker { display: none; }
+details.more summary::before { content: "+ "; }
+details.more[open] summary::before { content: "– "; }
+details.more .inner { display: flex; flex-direction: column; gap: 14px; margin-top: 12px; }
+
+.stats { font: 11px var(--font-data); color: var(--ink-soft); font-variant-numeric: tabular-nums; border-top: 1px solid var(--rule); padding-top: 10px; }
+
+.readout {
+  position: fixed; z-index: 1100; pointer-events: none; transform: translate(14px, -50%);
+  font: 500 12px var(--font-data); background: var(--ink); color: var(--paper);
+  padding: 4px 7px; border-radius: 5px; white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.pin { width: 22px; height: 22px; border-radius: 50%; background: var(--ink); border: 3px solid var(--paper); box-shadow: 0 0 0 2px var(--ink), 0 4px 10px rgba(0,0,0,0.35); }
+.pin::after { content: ""; position: absolute; inset: 5px; border-radius: 50%; background: var(--accent); }
+.leaflet-control-attribution { font-size: 10px; }
+.band-layer { image-rendering: auto; }
+
+body.collapsed .panel > :not(.brand) { display: none; }
+
+@media (max-width: 640px) {
+  .panel {
+    top: auto; left: 0; right: 0; bottom: 0; width: auto; max-height: 52%;
+    border-radius: 14px 14px 0 0; border-left: 0; border-right: 0; border-bottom: 0;
+    padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+  .leaflet-bottom.leaflet-right { bottom: 52%; }
+}
+@media (prefers-reduced-motion: reduce) { .bar > i { transition: none; } }
+</style>
+</head>
+<body>
+<div id="map" aria-label="Map"></div>
+
+<aside class="panel" aria-label="Travel time controls">
+  <div class="brand">
+    <h1>Arrival Bands</h1>
+    <button class="collapse" id="collapse" type="button" aria-expanded="true">hide</button>
+  </div>
+  <p class="lede">Click the map or drag the pin to set a start point. Each band is how far you get in that slice of time.</p>
+
+  <form class="search" id="search-form">
+    <input id="search" type="text" placeholder="Search a place" autocomplete="off" aria-label="Search a place">
+    <button class="btn" type="submit">Go</button>
+  </form>
+
+  <div class="field">
+    <span class="label">Travel by</span>
+    <div class="seg" id="mode" role="group" aria-label="Travel mode">
+      <button type="button" data-mode="drive" aria-pressed="true">Drive</button>
+      <button type="button" data-mode="bike" aria-pressed="false">Bike</button>
+      <button type="button" data-mode="walk" aria-pressed="false">Walk</button>
+    </div>
+  </div>
+
+  <div class="row">
+    <label class="field"><span class="label">Up to</span>
+      <select id="max-time">
+        <option value="10">10 min</option><option value="15">15 min</option><option value="20">20 min</option>
+        <option value="30" selected>30 min</option><option value="45">45 min</option><option value="60">1 hour</option>
+        <option value="90">1.5 hours</option><option value="120">2 hours</option>
+      </select>
+    </label>
+    <label class="field"><span class="label">Band every</span>
+      <select id="interval">
+        <option value="1">1 min</option><option value="2">2 min</option><option value="3">3 min</option>
+        <option value="5" selected>5 min</option><option value="10">10 min</option><option value="15">15 min</option><option value="20">20 min</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="actions">
+    <button class="btn primary" id="run" type="button">Map travel time</button>
+    <button class="btn" id="play" type="button" disabled aria-label="Play the arrival sweep">▶ Sweep</button>
+  </div>
+
+  <div class="status" aria-live="polite">
+    <div class="status-text" id="status">Ready.</div>
+    <div class="bar"><i id="bar"></i></div>
+  </div>
+
+  <div class="legend" id="legend" hidden>
+    <div class="legend-strip" id="legend-strip"></div>
+    <div class="legend-ticks" id="legend-ticks"></div>
+  </div>
+
+  <details class="more" id="more">
+    <summary>Model and look</summary>
+    <div class="inner">
+      <label class="field"><span class="label">Road detail</span>
+        <select id="detail">
+          <option value="auto" selected>Auto (by distance)</option>
+          <option value="major">Major roads only</option>
+          <option value="medium">Major + local connectors</option>
+          <option value="full">Every street and path</option>
+        </select>
+        <span class="note" id="detail-note"></span>
+      </label>
+
+      <div class="field">
+        <span class="label">Off-network speed</span>
+        <div class="range">
+          <input id="lastmile" type="range" min="2" max="30" step="1" value="5" aria-label="Off-network speed in km/h">
+          <output id="lastmile-out">auto</output>
+        </div>
+        <span class="note">How fast you cover ground between the mapped roads: walking, or minor streets that weren't downloaded.</span>
+      </div>
+
+      <label class="field"><span class="label">Off-network limit</span>
+        <select id="offcap">
+          <option value="5">5 min from a road</option><option value="10">10 min</option>
+          <option value="20" selected>20 min</option><option value="45">45 min</option><option value="0">No limit</option>
+        </select>
+      </label>
+
+      <label class="check"><input id="terrain" type="checkbox" checked>
+        <span>Use terrain. Slopes slow walking, cycling and off-network travel, and hillshade shows through the bands.</span></label>
+      <label class="check"><input id="soften" type="checkbox" checked>
+        <span>Soften band edges</span></label>
+
+      <div class="field">
+        <span class="label">Palette</span>
+        <div class="palettes" id="palettes"></div>
+      </div>
+
+      <div class="field">
+        <span class="label">Band opacity</span>
+        <div class="range">
+          <input id="opacity" type="range" min="0.2" max="1" step="0.05" value="0.78" aria-label="Band opacity">
+          <output id="opacity-out">78%</output>
+        </div>
+      </div>
+
+      <label class="field"><span class="label">Grid resolution</span>
+        <select id="res">
+          <option value="500">Coarse (fast)</option>
+          <option value="800" selected>Medium</option>
+          <option value="1200">Fine (slow)</option>
+        </select>
+      </label>
+    </div>
+  </details>
+
+  <div class="stats" id="stats">Roads and water © OpenStreetMap contributors via Overpass. Terrain: AWS Terrain Tiles.</div>
+</aside>
+
+<div class="readout" id="readout" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+<!-- ============================ ROUTING WORKER ============================ -->
+<script type="text/plain" id="worker-src">
+"use strict";
+const CIRC = 40075016.686;
+const lon2mx = lon => (lon + 180) / 360;
+const lat2my = lat => { const s = Math.sin(lat * Math.PI / 180); return 0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI); };
+const my2lat = my => Math.atan(Math.sinh(Math.PI * (1 - 2 * my))) * 180 / Math.PI;
+
+class Heap {
+  constructor(cap) { this.k = new Float64Array(cap); this.v = new Int32Array(cap); this.n = 0; this.topKey = 0; }
+  grow() {
+    const k = new Float64Array(this.k.length * 2); k.set(this.k); this.k = k;
+    const v = new Int32Array(this.v.length * 2); v.set(this.v); this.v = v;
+  }
+  push(key, val) {
+    if (this.n === this.k.length) this.grow();
+    const K = this.k, V = this.v; let i = this.n++;
+    while (i > 0) { const p = (i - 1) >> 1; if (K[p] <= key) break; K[i] = K[p]; V[i] = V[p]; i = p; }
+    K[i] = key; V[i] = val;
+  }
+  pop() {
+    const K = this.k, V = this.v; const topK = K[0], topV = V[0]; const n = --this.n;
+    if (n > 0) {
+      const key = K[n], val = V[n]; let i = 0;
+      for (;;) {
+        const l = 2 * i + 1; if (l >= n) break;
+        const r = l + 1; const m = (r < n && K[r] < K[l]) ? r : l;
+        if (K[m] >= key) break;
+        K[i] = K[m]; V[i] = V[m]; i = m;
+      }
+      K[i] = key; V[i] = val;
+    }
+    this.topKey = topK; return topV;
+  }
+}
+
+const DRIVE = { // km/h, noExit (you cannot leave the road between junctions)
+  motorway: [105, 1], motorway_link: [55, 1], trunk: [85, 0], trunk_link: [50, 0],
+  primary: [65, 0], primary_link: [45, 0], secondary: [55, 0], secondary_link: [40, 0],
+  tertiary: [45, 0], tertiary_link: [35, 0], unclassified: [40, 0], residential: [28, 0],
+  living_street: [10, 0], road: [30, 0], service: [15, 0]
+};
+const BIKE = {
+  trunk: 18, trunk_link: 16, primary: 17, primary_link: 16, secondary: 17, secondary_link: 16,
+  tertiary: 17, tertiary_link: 16, unclassified: 16, residential: 16, living_street: 12, road: 15,
+  service: 14, cycleway: 18, path: 13, track: 12, footway: 10, pedestrian: 10
+};
+const WALK = {
+  trunk: 5, trunk_link: 5, primary: 5, primary_link: 5, secondary: 5, secondary_link: 5, tertiary: 5,
+  tertiary_link: 5, unclassified: 5, residential: 5, living_street: 5, road: 5, service: 5,
+  cycleway: 5, path: 4.6, track: 4.8, footway: 5, pedestrian: 5, steps: 2.4
+};
+const UNPAVED = /^(gravel|dirt|ground|unpaved|compacted|grass|sand|fine_gravel|earth|mud|pebblestone|rock|wood)$/;
+
+function parseSpeed(s) {
+  if (!s) return 0;
+  if (s === "none") return 130;
+  const m = /^(\d+(?:\.\d+)?)\s*(mph)?/.exec(s);
+  if (!m) return 0;
+  return parseFloat(m[1]) * (m[2] ? 1.609 : 1);
+}
+function onewayOf(t, implied) {
+  const o = t.oneway;
+  if (o === "yes" || o === "1" || o === "true") return 1;
+  if (o === "-1" || o === "reverse") return -1;
+  if (o === "no") return 0;
+  return implied ? 1 : 0;
+}
+const yes = v => v === "yes" || v === "designated" || v === "permissive";
+
+function profile(t, mode) {
+  if (t.route === "ferry") {
+    if (mode === "drive" && (t.motor_vehicle === "no" || t.motorcar === "no")) return null;
+    if (mode === "bike" && t.bicycle === "no") return null;
+    if (mode === "walk" && t.foot === "no") return null;
+    return { kmh: 18, oneway: 0, exit: false, ferry: true, curvy: false, flat: true };
+  }
+  const h = t.highway;
+  if (!h || t.area === "yes") return null;
+  const blocked = t.access === "no" || t.access === "private";
+  // bridges and tunnels: no grade from the terrain model, and no stepping off partway across
+  const flat = (!!t.bridge && t.bridge !== "no") || (!!t.tunnel && t.tunnel !== "no" && t.tunnel !== "building_passage");
+  if (mode === "drive") {
+    const p = DRIVE[h]; if (!p) return null;
+    if (t.motor_vehicle === "no" || t.motorcar === "no") return null;
+    if (blocked && !(yes(t.motor_vehicle) || yes(t.motorcar))) return null;
+    let kmh = p[0];
+    const ms = parseSpeed(t.maxspeed);
+    if (ms) kmh = Math.min(ms * 0.88, p[0] * 1.35);
+    const isMw = h === "motorway" || h === "motorway_link";
+    return { kmh, oneway: onewayOf(t, isMw || t.junction === "roundabout"), exit: !p[1] && !flat, ferry: false,
+             curvy: !(isMw || /_link$/.test(h)), flat };
+  }
+  if (mode === "bike") {
+    let kmh = BIKE[h]; if (!kmh) return null;
+    if (t.bicycle === "no" || t.bicycle === "use_sidepath" || t.bicycle === "dismount") return null;
+    if ((h === "footway" || h === "pedestrian") && !yes(t.bicycle)) return null;
+    if (blocked && !yes(t.bicycle)) return null;
+    if (UNPAVED.test(t.surface || "") || (h === "track" && !t.surface)) kmh *= 0.7;
+    const ow = t["oneway:bicycle"] === "no" ? 0 : onewayOf(t, t.junction === "roundabout");
+    return { kmh, oneway: ow, exit: !flat, ferry: false, curvy: false, flat };
+  }
+  let kmh = WALK[h]; if (!kmh) return null;
+  if (t.foot === "no" || t.foot === "use_sidepath") return null;
+  if (blocked && !yes(t.foot)) return null;
+  if ((h === "trunk" || h === "trunk_link") && t.sidewalk === "no" && !yes(t.foot)) return null;
+  return { kmh, oneway: 0, exit: !flat, ferry: false, curvy: false, flat };
+}
+
+// relative speed factors vs. flat ground
+const TOBLER0 = Math.exp(-3.5 * 0.05);
+const tobler = g => Math.exp(-3.5 * Math.abs(g + 0.05)) / TOBLER0;
+const bikeGrade = g => g > 0 ? 1 / (1 + 10 * g) : 1 + Math.min(-g, 0.1) * 4;
+
+function progress(msg, frac) { self.postMessage({ type: "progress", msg, frac }); }
+
+self.onmessage = (e) => {
+  try {
+    const out = compute(e.data);
+    self.postMessage(out, [out.T.buffer]);
+  } catch (err) {
+    self.postMessage({ type: "error", message: String((err && err.message) || err) });
+  }
+};
+
+function compute(d) {
+  const { grid, mode, maxSec, terrain, soften } = d;
+  const { mx0, my0, c, W, H } = grid;
+  const NC = W * H;
+  const elev = terrain && d.elev ? d.elev : null;
+  const lastMps = d.lastMileKmh / 3.6;
+  const offCap = d.offCapSec > 0 ? d.offCapSec : Infinity;
+
+  progress("Reading map data", 0.55);
+  const data = JSON.parse(new TextDecoder().decode(d.buf));
+  if (data.remark && /error|timed out|out of memory/i.test(data.remark)) throw new Error("Overpass: " + data.remark);
+  const els = data.elements || [];
+
+  // ---------- nodes ----------
+  const nodeIndex = new Map();
+  let nn = 0;
+  for (const el of els) if (el.type === "node") nn++;
+  const nLat = new Float64Array(nn), nLon = new Float64Array(nn);
+  const nGx = new Float64Array(nn), nGy = new Float64Array(nn), nCell = new Int32Array(nn);
+  nn = 0;
+  for (const el of els) {
+    if (el.type !== "node") continue;
+    nodeIndex.set(el.id, nn);
+    nLat[nn] = el.lat; nLon[nn] = el.lon;
+    const gx = (lon2mx(el.lon) - mx0) / c, gy = (lat2my(el.lat) - my0) / c;
+    nGx[nn] = gx; nGy[nn] = gy;
+    const ix = Math.floor(gx), iy = Math.floor(gy);
+    nCell[nn] = (ix >= 0 && iy >= 0 && ix < W && iy < H) ? iy * W + ix : -1;
+    nn++;
+  }
+
+  // ---------- rows: meters per cell ----------
+  const rowM = new Float64Array(H);
+  for (let y = 0; y < H; y++) rowM[y] = c * CIRC * Math.cos(my2lat(my0 + (y + 0.5) * c) * Math.PI / 180);
+
+  const elevAt = (gx, gy) => {
+    if (!elev) return 0;
+    let x = Math.min(Math.max(gx - 0.5, 0), W - 1.001), y = Math.min(Math.max(gy - 0.5, 0), H - 1.001);
+    const x0 = Math.floor(x), y0 = Math.floor(y), fx = x - x0, fy = y - y0, i = y0 * W + x0;
+    const x1 = Math.min(x0 + 1, W - 1) - x0, y1 = (Math.min(y0 + 1, H - 1) - y0) * W;
+    return (elev[i] * (1 - fx) + elev[i + x1] * fx) * (1 - fy) + (elev[i + y1] * (1 - fx) + elev[i + y1 + x1] * fx) * fy;
+  };
+
+  // ---------- water barriers ----------
+  progress("Drawing rivers, lakes and coastline", 0.6);
+  const barrier = new Uint8Array(NC);
+  const toG = p => [(lon2mx(p.lon) - mx0) / c, (lat2my(p.lat) - my0) / c];
+  const mark = (x, y) => { if (x >= 0 && y >= 0 && x < W && y < H) barrier[y * W + x] = 1; };
+  function strokeLine(pts) {
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i];
+      if (!a || !b) continue;
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const steps = Math.max(1, Math.ceil(L / 0.4));
+      let px = Math.floor(a[0]), py = Math.floor(a[1]);
+      mark(px, py);
+      for (let s = 1; s <= steps; s++) {
+        const f = s / steps, x = Math.floor(a[0] + (b[0] - a[0]) * f), y = Math.floor(a[1] + (b[1] - a[1]) * f);
+        if (x !== px && y !== py) mark(px, y); // keep the line 4-connected so nothing slips diagonally
+        mark(x, y); px = x; py = y;
+      }
+    }
+  }
+  function fillRings(rings) {
+    let minY = Infinity, maxY = -Infinity;
+    for (const r of rings) for (const p of r) { if (p[1] < minY) minY = p[1]; if (p[1] > maxY) maxY = p[1]; }
+    const y0 = Math.max(0, Math.floor(minY)), y1 = Math.min(H - 1, Math.ceil(maxY));
+    const xs = [];
+    for (let y = y0; y <= y1; y++) {
+      const sy = y + 0.5; xs.length = 0;
+      for (const r of rings) {
+        for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+          const a = r[j], b = r[i];
+          if ((a[1] > sy) !== (b[1] > sy)) xs.push(a[0] + (sy - a[1]) / (b[1] - a[1]) * (b[0] - a[0]));
+        }
+      }
+      xs.sort((p, q) => p - q);
+      for (let k = 0; k + 1 < xs.length; k += 2) {
+        const xa = Math.max(0, Math.ceil(xs[k] - 0.5)), xb = Math.min(W - 1, Math.floor(xs[k + 1] - 0.5));
+        for (let x = xa; x <= xb; x++) barrier[y * W + x] = 1;
+      }
+    }
+  }
+  const geomPts = g => (g || []).map(p => (p && p.lat != null) ? toG(p) : null);
+  const complete = pts => pts.length > 3 && pts.every(Boolean);
+  const isClosed = pts => complete(pts) && Math.abs(pts[0][0] - pts[pts.length - 1][0]) < 1e-9 && Math.abs(pts[0][1] - pts[pts.length - 1][1]) < 1e-9;
+  function joinRings(lines) {
+    const rings = []; const pool = lines.filter(complete).map(l => l.slice());
+    const key = p => p[0].toFixed(7) + "," + p[1].toFixed(7);
+    while (pool.length) {
+      let cur = pool.pop();
+      for (let guard = 0; guard < 5000 && key(cur[0]) !== key(cur[cur.length - 1]); guard++) {
+        const endK = key(cur[cur.length - 1]);
+        const idx = pool.findIndex(l => key(l[0]) === endK || key(l[l.length - 1]) === endK);
+        if (idx < 0) break;
+        let nxt = pool.splice(idx, 1)[0];
+        if (key(nxt[0]) !== endK) nxt = nxt.slice().reverse();
+        cur = cur.concat(nxt.slice(1));
+      }
+      if (key(cur[0]) === key(cur[cur.length - 1])) rings.push(cur);
+    }
+    return rings;
+  }
+  let waterCount = 0;
+  for (const el of els) {
+    const t = el.tags || {};
+    if (el.type === "way" && el.geometry) {
+      const pts = geomPts(el.geometry);
+      const area = t.natural === "water" || t.waterway === "riverbank";
+      if (area && isClosed(pts)) fillRings([pts]);
+      strokeLine(pts); waterCount++;
+    } else if (el.type === "relation" && el.members) {
+      const lines = [];
+      for (const m of el.members) {
+        if (m.type !== "way" || !m.geometry) continue;
+        const pts = geomPts(m.geometry);
+        strokeLine(pts); lines.push(pts);
+      }
+      const rings = joinRings(lines);
+      if (rings.length) fillRings(rings);
+      waterCount++;
+    }
+  }
+
+  // ---------- road graph ----------
+  progress("Building the road graph", 0.68);
+  const eF = [], eT = [], eW = [], eX = [];
+  const nodeExit = new Uint8Array(nn), deg = new Uint16Array(nn), nodeFerry = new Uint8Array(nn);
+  let wayCount = 0;
+  const segM = (a, b) => {
+    const k = Math.cos((nLat[a] + nLat[b]) * Math.PI / 360);
+    return Math.hypot((nLon[b] - nLon[a]) * k, nLat[b] - nLat[a]) * 111319.5;
+  };
+  for (const el of els) {
+    if (el.type !== "way" || el.geometry || !el.nodes || !el.tags) continue;
+    const p = profile(el.tags, mode);
+    if (!p) continue;
+    const ids = [];
+    for (const id of el.nodes) { const i = nodeIndex.get(id); if (i !== undefined) ids.push(i); }
+    if (ids.length < 2) continue;
+    wayCount++;
+    let kmh = p.kmh;
+    if (mode === "drive" && p.curvy) {
+      // winding roads (mountain passes, river gorges) are slower than their class suggests
+      let turn = 0, len = 0, prevH = null;
+      for (let i = 1; i < ids.length; i++) {
+        const a = ids[i - 1], b = ids[i]; const m = segM(a, b); len += m;
+        if (m < 5) continue;
+        const hd = Math.atan2(nLat[b] - nLat[a], (nLon[b] - nLon[a]) * Math.cos(nLat[a] * Math.PI / 180));
+        if (prevH !== null) { let dh = Math.abs(hd - prevH); if (dh > Math.PI) dh = 2 * Math.PI - dh; turn += dh; }
+        prevH = hd;
+      }
+      if (len > 200) {
+        const degPerKm = (turn * 57.2958) / (len / 1000);
+        kmh *= Math.max(0.4, 1 / (1 + degPerKm / 700));
+      }
+    }
+    const mps = kmh / 3.6;
+    const nSeg = ids.length - 1;
+    for (let i = 1; i < ids.length; i++) {
+      const a = ids[i - 1], b = ids[i];
+      const m = Math.max(segM(a, b), 0.5);
+      deg[a]++; deg[b]++;
+      let tf, tr;
+      if (mode === "drive" || p.flat || !elev) {
+        tf = tr = m / mps;
+      } else {
+        const g = Math.max(-0.5, Math.min(0.5, (elevAt(nGx[b], nGy[b]) - elevAt(nGx[a], nGy[a])) / m));
+        const f = mode === "bike" ? bikeGrade : tobler;
+        tf = m / (mps * f(g)); tr = m / (mps * f(-g));
+      }
+      if (p.ferry) { // boarding and waiting
+        if (i === 1) tf += 600;
+        if (i === nSeg) tr += 600;
+        nodeFerry[a] = nodeFerry[b] = 1;
+      }
+      if (p.oneway !== -1) { eF.push(a); eT.push(b); eW.push(tf); eX.push(p.exit ? 1 : 0); }
+      if (p.oneway !== 1) { eF.push(b); eT.push(a); eW.push(tr); eX.push(p.exit ? 1 : 0); }
+      if (p.exit) { nodeExit[a] = 1; nodeExit[b] = 1; }
+    }
+  }
+  const ne = eF.length;
+  // junction delay for driving: stop signs, lights, turns
+  if (mode === "drive") for (let e = 0; e < ne; e++) { const v = eT[e]; if (deg[v] >= 3 && nodeExit[v]) eW[e] += 4; }
+  const off0 = new Int32Array(nn + 1);
+  for (let e = 0; e < ne; e++) off0[eF[e] + 1]++;
+  for (let i = 0; i < nn; i++) off0[i + 1] += off0[i];
+  const adjT = new Int32Array(ne), adjW = new Float32Array(ne), adjX = new Uint8Array(ne);
+  { const fillPos = off0.slice(0, nn);
+    for (let e = 0; e < ne; e++) { const k = fillPos[eF[e]]++; adjT[k] = eT[e]; adjW[k] = eW[e]; adjX[k] = eX[e]; } }
+  eF.length = eT.length = eW.length = eX.length = 0;
+
+  // cell -> nodes you can step onto
+  const cOff = new Int32Array(NC + 1);
+  for (let i = 0; i < nn; i++) if (nodeExit[i] && nCell[i] >= 0) cOff[nCell[i] + 1]++;
+  for (let i = 0; i < NC; i++) cOff[i + 1] += cOff[i];
+  const cNodes = new Int32Array(cOff[NC]);
+  { const pos = cOff.slice(0, NC); for (let i = 0; i < nn; i++) if (nodeExit[i] && nCell[i] >= 0) cNodes[pos[nCell[i]]++] = i; }
+
+  // ---------- one Dijkstra over grid cells and road nodes together ----------
+  progress("Routing outward from the start", 0.75);
+  const N = NC + nn;
+  const dist = new Float64Array(N).fill(Infinity);
+  const off = new Float32Array(NC);
+  const heap = new Heap(1 << 16);
+  const sgx = (lon2mx(d.start.lng) - mx0) / c, sgy = (lat2my(d.start.lat) - my0) / c;
+  const sx = Math.floor(sgx), sy = Math.floor(sgy);
+  if (sx < 0 || sy < 0 || sx >= W || sy >= H) throw new Error("The start point is outside the grid.");
+  const sCell = sy * W + sx;
+  dist[sCell] = 0; heap.push(0, sCell);
+  // also step straight onto the nearest few road nodes, so a start in a field still finds the road
+  {
+    const cand = [];
+    for (let i = 0; i < nn; i++) if (nodeExit[i]) {
+      const dd = Math.hypot(nGx[i] - sgx, nGy[i] - sgy);
+      if (dd < 40) cand.push([dd, i]);
+    }
+    cand.sort((a, b) => a[0] - b[0]);
+    for (const [dd, i] of cand.slice(0, 6)) {
+      const t = dd * rowM[sy] / Math.max(lastMps, 1.2);
+      if (t < dist[NC + i]) { dist[NC + i] = t; heap.push(t, NC + i); }
+    }
+  }
+  const DX = [1, -1, 0, 0, 1, 1, -1, -1], DY = [0, 0, 1, -1, 1, -1, 1, -1];
+  const SQ2 = Math.SQRT2;
+  let reachedNodes = 0, popped = 0;
+  const reportEvery = 400000;
+  while (heap.n > 0) {
+    const u = heap.pop(); const k = heap.topKey;
+    if (k > dist[u]) continue;
+    if (k > maxSec) break;
+    if (++popped % reportEvery === 0) progress("Routing outward from the start · " + Math.round(k / 60) + " min", 0.75 + 0.2 * Math.min(1, k / maxSec));
+    if (u < NC) {
+      const x = u % W, y = (u - x) / W;
+      for (let j = cOff[u], je = cOff[u + 1]; j < je; j++) {
+        const v = NC + cNodes[j];
+        if (k < dist[v]) { dist[v] = k; heap.push(k, v); }
+      }
+      const base = rowM[y];
+      const ou = off[u];
+      const eu = elev ? elev[u] : 0;
+      for (let dI = 0; dI < 8; dI++) {
+        const nx = x + DX[dI], ny = y + DY[dI];
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const v = ny * W + nx;
+        if (barrier[v]) continue;
+        const diag = dI >= 4;
+        if (diag && (barrier[y * W + nx] || barrier[ny * W + x])) continue;
+        const len = diag ? base * SQ2 : base;
+        let spd = lastMps;
+        if (elev) spd *= tobler(Math.max(-1, Math.min(1, (elev[v] - eu) / len)));
+        const t = len / spd;
+        const no = ou + t;
+        if (no > offCap) continue;
+        const nk = k + t;
+        if (nk < dist[v]) { dist[v] = nk; off[v] = no; heap.push(nk, v); }
+      }
+    } else {
+      const n = u - NC;
+      reachedNodes++;
+      if (nodeExit[n]) {
+        const cell = nCell[n];
+        if (cell >= 0 && k < dist[cell]) { dist[cell] = k; off[cell] = 0; heap.push(k, cell); }
+      }
+      const gx0 = nGx[n], gy0 = nGy[n];
+      for (let j = off0[n], je = off0[n + 1]; j < je; j++) {
+        const v = adjT[j], w = adjW[j];
+        const nk = k + w;
+        if (nk < dist[NC + v]) { dist[NC + v] = nk; heap.push(nk, NC + v); }
+        if (!adjX[j]) continue;
+        // you can leave the road anywhere along this segment: paint the cells it crosses
+        const gx1 = nGx[v], gy1 = nGy[v];
+        const L = Math.hypot(gx1 - gx0, gy1 - gy0);
+        if (L < 0.5) continue;
+        const steps = Math.ceil(L * 2);
+        for (let s = 1; s < steps; s++) {
+          const f = s / steps, t = k + f * w;
+          if (t > maxSec) break;
+          const ix = Math.floor(gx0 + (gx1 - gx0) * f), iy = Math.floor(gy0 + (gy1 - gy0) * f);
+          if (ix < 0 || iy < 0 || ix >= W || iy >= H) continue;
+          const cell = iy * W + ix;
+          if (t < dist[cell]) { dist[cell] = t; off[cell] = 0; heap.push(t, cell); }
+        }
+      }
+    }
+  }
+
+  progress("Finishing", 0.97);
+  let T = new Float32Array(NC);
+  let reached = 0, area = 0, far = 0;
+  for (let i = 0; i < NC; i++) {
+    const v = dist[i];
+    if (v <= maxSec) { T[i] = v; reached++; const y = (i / W) | 0; area += rowM[y] * rowM[y]; if (v > far) far = v; }
+    else T[i] = Infinity;
+  }
+  if (soften) {
+    const S = new Float32Array(NC);
+    const wk = [1, 2, 1];
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = y * W + x; const v = T[i];
+      if (v === Infinity) { S[i] = Infinity; continue; }
+      let sum = 0, ws = 0;
+      for (let dy = -1; dy <= 1; dy++) { const yy = y + dy; if (yy < 0 || yy >= H) continue;
+        for (let dx = -1; dx <= 1; dx++) { const xx = x + dx; if (xx < 0 || xx >= W) continue;
+          const q = T[yy * W + xx]; if (q === Infinity) continue;
+          const wt = wk[dx + 1] * wk[dy + 1]; sum += q * wt; ws += wt; } }
+      S[i] = sum / ws;
+    }
+    T = S;
+  }
+  return { type: "done", T, stats: { reached, areaKm2: area / 1e6, far, nodes: nn, ways: wayCount, edges: ne, reachedNodes, water: waterCount } };
+}
+</script>
+
+<!-- ============================ PAGE ============================ -->
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const CIRC = 40075016.686;
+const lon2mx = lon => (lon + 180) / 360;
+const lat2my = lat => { const s = Math.sin(lat * Math.PI / 180); return 0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI); };
+const mx2lon = mx => mx * 360 - 180;
+const my2lat = my => Math.atan(Math.sinh(Math.PI * (1 - 2 * my))) * 180 / Math.PI;
+
+const OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
+const TERRAIN = (z, x, y) => `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`;
+
+const PALETTES = {
+  ember: ["#fff4c4", "#ffd877", "#f9ae4c", "#ef7f3d", "#dc5245", "#b9345f", "#8b2f78", "#5d3683", "#383f80", "#23537b", "#1b6c73"],
+  tide:  ["#f2fcc0", "#c3e6a0", "#82cc9e", "#45b0a5", "#2a8fa8", "#2c6da3", "#354e94", "#3b357a", "#3a2360"],
+  heath: ["#fbe8f0", "#f4c0d6", "#ea95bd", "#d76ba5", "#b84d8f", "#90397c", "#683067", "#46264f", "#2b1c36"]
+};
+
+const MODES = {
+  drive: { vmax: 100, classes: {
+    major: "motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link",
+    medium: "motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified",
+    full: "motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street|road|service" },
+    auto: R => R <= 12 ? "full" : R <= 45 ? "medium" : "major" },
+  bike: { vmax: 21, classes: {
+    major: "trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|cycleway",
+    medium: "trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|cycleway|residential|living_street|road",
+    full: "trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|cycleway|residential|living_street|road|service|track|path|footway|pedestrian" },
+    auto: R => R <= 15 ? "full" : R <= 30 ? "medium" : "major" },
+  walk: { vmax: 5.6, classes: {
+    major: "trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street|road|pedestrian",
+    medium: "trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street|road|service|pedestrian|footway|cycleway",
+    full: "trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street|road|service|track|path|footway|pedestrian|steps|cycleway" },
+    auto: () => "full" }
+};
+const DETAIL_LABEL = { major: "major roads", medium: "major roads and local connectors", full: "every street and path" };
+
+const state = {
+  start: { lat: 45.5152, lng: -122.6784 },
+  mode: "drive", maxMin: 30, interval: 5, detail: "auto",
+  lastMile: null, offCap: 20, terrain: true, soften: true,
+  palette: "ember", opacity: 0.78, res: 800,
+  result: null
+};
+
+// ---------- hash: #lat,lng,mode,minutes,band ----------
+function readHash() {
+  const p = location.hash.slice(1).split(",");
+  if (p.length >= 2 && isFinite(+p[0]) && isFinite(+p[1]) && p[0] !== "") state.start = { lat: +p[0], lng: +p[1] };
+  if (MODES[p[2]]) state.mode = p[2];
+  if (+p[3] > 0) state.maxMin = Math.min(180, +p[3]);
+  if (+p[4] > 0) state.interval = +p[4];
+}
+function writeHash() {
+  const h = `#${state.start.lat.toFixed(5)},${state.start.lng.toFixed(5)},${state.mode},${state.maxMin},${state.interval}`;
+  history.replaceState(null, "", h);
+}
+readHash();
+
+// ---------- map ----------
+const map = L.map("map", { zoomControl: false }).setView([state.start.lat, state.start.lng], 10);
+L.control.zoom({ position: "topright" }).addTo(map);
+map.createPane("bands"); map.getPane("bands").style.zIndex = 350; map.getPane("bands").style.pointerEvents = "none";
+map.createPane("labels"); map.getPane("labels").style.zIndex = 450; map.getPane("labels").style.pointerEvents = "none";
+const darkMQ = matchMedia("(prefers-color-scheme: dark)");
+const isDark = () => document.documentElement.dataset.theme ? document.documentElement.dataset.theme === "dark" : darkMQ.matches;
+const esri = (name) => `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/${name}/MapServer/tile/{z}/{y}/{x}`;
+const baseName = () => isDark() ? "World_Dark_Gray_Base" : "World_Light_Gray_Base";
+const refName = () => isDark() ? "World_Dark_Gray_Reference" : "World_Light_Gray_Reference";
+const baseLayer = L.tileLayer(esri(baseName()), {
+  maxZoom: 19, maxNativeZoom: 16,
+  attribution: 'Basemap: Esri, HERE, Garmin, &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors · Terrain: AWS Terrain Tiles'
+}).addTo(map);
+const labelLayer = L.tileLayer(esri(refName()), { maxZoom: 19, maxNativeZoom: 16, pane: "labels" }).addTo(map);
+darkMQ.addEventListener("change", () => { baseLayer.setUrl(esri(baseName())); labelLayer.setUrl(esri(refName())); });
+
+const marker = L.marker([state.start.lat, state.start.lng], {
+  draggable: true, keyboard: true, title: "Start point",
+  icon: L.divIcon({ className: "", html: '<div class="pin"></div>', iconSize: [22, 22], iconAnchor: [11, 11] })
+}).addTo(map);
+marker.on("dragend", () => { const p = marker.getLatLng(); setStart(p.lat, p.lng, true); });
+map.on("click", e => setStart(e.latlng.lat, e.latlng.lng, true));
+
+function setStart(lat, lng, go) {
+  state.start = { lat, lng: ((lng + 540) % 360) - 180 };
+  marker.setLatLng([lat, lng]);
+  writeHash();
+  if (go) run();
+}
+
+// A Leaflet overlay that positions a <canvas> exactly like an image overlay (projected, so it stays Mercator-true).
+const CanvasOverlay = L.ImageOverlay.extend({
+  _initImage() {
+    const el = this._image = this._url;
+    L.DomUtil.addClass(el, "leaflet-image-layer");
+    L.DomUtil.addClass(el, "band-layer");
+    if (this._zoomAnimated) L.DomUtil.addClass(el, "leaflet-zoom-animated");
+    el.onselectstart = L.Util.falseFn; el.onmousemove = L.Util.falseFn;
+  }
+});
+let overlay = null;
+
+// ---------- UI wiring ----------
+const ui = {
+  run: $("#run"), play: $("#play"), status: $("#status"), bar: $("#bar"),
+  maxTime: $("#max-time"), interval: $("#interval"), detail: $("#detail"), detailNote: $("#detail-note"),
+  lastmile: $("#lastmile"), lastmileOut: $("#lastmile-out"), offcap: $("#offcap"), terrain: $("#terrain"),
+  soften: $("#soften"), opacity: $("#opacity"), opacityOut: $("#opacity-out"), res: $("#res"), stats: $("#stats"),
+  readout: $("#readout")
+};
+ui.maxTime.value = String(state.maxMin);
+if (![...ui.maxTime.options].some(o => o.value === String(state.maxMin))) {
+  const o = new Option(state.maxMin + " min", state.maxMin); ui.maxTime.add(o); ui.maxTime.value = String(state.maxMin);
+}
+ui.interval.value = String(state.interval);
+document.querySelectorAll("#mode button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === state.mode)));
+
+function setStatus(msg, frac, isError) {
+  ui.status.textContent = msg;
+  ui.status.classList.toggle("error", !!isError);
+  if (frac != null) ui.bar.style.width = Math.round(frac * 100) + "%";
+}
+
+document.querySelectorAll("#mode button").forEach(b => b.addEventListener("click", () => {
+  state.mode = b.dataset.mode;
+  document.querySelectorAll("#mode button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  if (state.mode === "walk" && state.maxMin > 60) { state.maxMin = 60; ui.maxTime.value = "60"; }
+  updatePlanNote(); writeHash(); run();
+}));
+ui.maxTime.addEventListener("change", () => { state.maxMin = +ui.maxTime.value; updatePlanNote(); writeHash(); run(); });
+ui.interval.addEventListener("change", () => { state.interval = +ui.interval.value; writeHash(); if (state.result) { buildColors(); drawFull(); renderLegend(); } });
+ui.detail.addEventListener("change", () => { state.detail = ui.detail.value; updatePlanNote(); run(); });
+ui.lastmile.addEventListener("input", () => { state.lastMile = +ui.lastmile.value; updatePlanNote(); });
+ui.lastmile.addEventListener("change", () => run());
+ui.offcap.addEventListener("change", () => { state.offCap = +ui.offcap.value; run(); });
+ui.terrain.addEventListener("change", () => { state.terrain = ui.terrain.checked; run(); });
+ui.soften.addEventListener("change", () => { state.soften = ui.soften.checked; run(); });
+ui.res.addEventListener("change", () => { state.res = +ui.res.value; run(); });
+ui.opacity.addEventListener("input", () => {
+  state.opacity = +ui.opacity.value; ui.opacityOut.textContent = Math.round(state.opacity * 100) + "%";
+  if (overlay) overlay.setOpacity(state.opacity);
+});
+ui.run.addEventListener("click", () => run());
+ui.play.addEventListener("click", () => sweeping ? stopSweep() : startSweep());
+$("#collapse").addEventListener("click", e => {
+  const c = document.body.classList.toggle("collapsed");
+  e.currentTarget.textContent = c ? "show" : "hide"; e.currentTarget.setAttribute("aria-expanded", String(!c));
+});
+$("#search-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const q = $("#search").value.trim(); if (!q) return;
+  setStatus("Looking up " + q + "…", 0);
+  try {
+    const r = await fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=" + encodeURIComponent(q));
+    const j = await r.json();
+    if (!j.length) { setStatus("No place found for “" + q + "”. Try a city or street address.", 0, true); return; }
+    const lat = +j[0].lat, lng = +j[0].lon;
+    map.setView([lat, lng], map.getZoom() < 9 ? 10 : map.getZoom());
+    needFit = true;
+    setStart(lat, lng, true);
+  } catch (err) { setStatus("Place search failed: " + err.message, 0, true); }
+});
+
+// palette chips
+const palWrap = $("#palettes");
+for (const [name, stops] of Object.entries(PALETTES)) {
+  const b = document.createElement("button"); b.type = "button"; b.title = name; b.setAttribute("aria-label", name + " palette");
+  b.setAttribute("aria-pressed", String(name === state.palette));
+  const cv = document.createElement("canvas"); cv.width = 128; cv.height = 28;
+  const g = cv.getContext("2d"); const grad = g.createLinearGradient(0, 0, 128, 0);
+  stops.forEach((s, i) => grad.addColorStop(i / (stops.length - 1), s)); g.fillStyle = grad; g.fillRect(0, 0, 128, 28);
+  b.appendChild(cv);
+  b.addEventListener("click", () => {
+    state.palette = name; palWrap.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    if (state.result) { buildColors(); drawFull(); renderLegend(); }
+  });
+  palWrap.appendChild(b);
+}
+
+// ---------- plan ----------
+function plan() {
+  const M = MODES[state.mode];
+  const R = Math.max(1.5, Math.min(180, state.maxMin / 60 * M.vmax * 0.95)); // km
+  const detail = state.detail === "auto" ? M.auto(R) : state.detail;
+  const lastMile = state.lastMile ?? (state.mode === "walk" ? 4.5 : detail === "full" ? 5 : 15);
+  const lat = state.start.lat, lng = state.start.lng;
+  const dLat = R / 111.32, dLon = R / (111.32 * Math.cos(lat * Math.PI / 180));
+  const s = Math.max(-84, lat - dLat), n = Math.min(84, lat + dLat), w = lng - dLon, e = lng + dLon;
+  const mx0 = lon2mx(w), mx1 = lon2mx(e), my0 = lat2my(n), my1 = lat2my(s);
+  const c = Math.max(mx1 - mx0, my1 - my0) / state.res;
+  const W = Math.ceil((mx1 - mx0) / c), H = Math.ceil((my1 - my0) / c);
+  const grid = { mx0, my0, c, W, H };
+  const bb = `${s.toFixed(5)},${w.toFixed(5)},${n.toFixed(5)},${e.toFixed(5)}`;
+  const svc = (detail === "full" && state.mode === "drive") ? '["service"!~"parking_aisle|driveway|drive-through|emergency_access"]' : "";
+  const query = `[out:json][timeout:180];
+(
+  way["highway"~"^(${M.classes[detail]})$"]${svc}(${bb});
+  way["route"="ferry"](${bb});
+)->.r;
+.r out body qt;
+.r >;
+out skel qt;
+(
+  way["natural"~"^(water|coastline)$"](${bb});
+  way["waterway"~"^(river|canal|riverbank)$"](${bb});
+  relation["natural"="water"](${bb});
+  relation["waterway"="riverbank"](${bb});
+);
+out geom(${bb}) qt;`;
+  return { R, detail, lastMile, grid, query, bounds: [[s, w], [n, e]] };
+}
+function updatePlanNote() {
+  const p = plan();
+  ui.detailNote.textContent = `Downloads ${DETAIL_LABEL[p.detail]} within ${Math.round(p.R)} km.`;
+  ui.lastmileOut.textContent = (state.lastMile == null ? "auto · " : "") + p.lastMile + " km/h";
+  if (state.lastMile == null) ui.lastmile.value = p.lastMile;
+}
+updatePlanNote();
+
+// ---------- data loading ----------
+const osmCache = new Map();
+async function fetchOsm(query, signal, onProgress) {
+  if (osmCache.has(query)) return osmCache.get(query);
+  let lastErr;
+  for (const url of OVERPASS) {
+    try {
+      const r = await fetch(url, { method: "POST", body: "data=" + encodeURIComponent(query),
+        headers: { "Content-Type": "application/x-www-form-urlencoded" }, signal });
+      if (r.status === 429) throw new Error("Overpass is rate-limiting requests. Wait a minute, then try again.");
+      if (r.status === 504) throw new Error("Overpass timed out. Try a shorter time, a lower road detail, or wait and retry.");
+      if (!r.ok) throw new Error("Overpass answered " + r.status + ".");
+      const reader = r.body.getReader(); const chunks = []; let got = 0;
+      for (;;) { const { done, value } = await reader.read(); if (done) break; chunks.push(value); got += value.length; onProgress(got); }
+      const buf = new Uint8Array(got); let o = 0; for (const ch of chunks) { buf.set(ch, o); o += ch.length; }
+      osmCache.set(query, buf.buffer);
+      if (osmCache.size > 3) osmCache.delete(osmCache.keys().next().value);
+      return buf.buffer;
+    } catch (err) {
+      if (err.name === "AbortError") throw err;
+      lastErr = err;
+    }
+  }
+  throw lastErr;
+}
+
+function loadImage(src, signal) {
+  return new Promise((res, rej) => {
+    const img = new Image(); img.crossOrigin = "anonymous";
+    img.onload = () => res(img); img.onerror = () => rej(new Error("tile failed"));
+    signal?.addEventListener("abort", () => { img.src = ""; rej(new DOMException("aborted", "AbortError")); });
+    img.src = src;
+  });
+}
+async function loadElevation(grid, signal) {
+  const { mx0, my0, c, W, H } = grid;
+  let z = Math.max(1, Math.min(14, Math.round(Math.log2(1 / (256 * c)))));
+  let tiles;
+  for (;;) {
+    const n = 2 ** z;
+    const tx0 = Math.floor(mx0 * n), tx1 = Math.floor((mx0 + W * c) * n - 1e-9);
+    const ty0 = Math.floor(my0 * n), ty1 = Math.floor((my0 + H * c) * n - 1e-9);
+    tiles = [];
+    for (let x = tx0; x <= tx1; x++) for (let y = ty0; y <= ty1; y++) tiles.push([x, y]);
+    if (tiles.length <= 64 || z <= 1) break;
+    z--;
+  }
+  const n = 2 ** z;
+  const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+  const ctx = cv.getContext("2d", { willReadFrequently: true });
+  ctx.imageSmoothingEnabled = false;
+  await Promise.all(tiles.map(([x, y]) => loadImage(TERRAIN(z, x, y), signal).then(img => {
+    const dx = (x / n - mx0) / c, dy = (y / n - my0) / c, dw = 1 / n / c;
+    const x0 = Math.floor(dx), y0 = Math.floor(dy), x1 = Math.ceil(dx + dw), y1 = Math.ceil(dy + dw);
+    ctx.drawImage(img, x0, y0, x1 - x0, y1 - y0);
+  }).catch(err => { if (err.name === "AbortError") throw err; })));
+  const px = ctx.getImageData(0, 0, W, H).data;
+  let elev = new Float32Array(W * H);
+  for (let i = 0; i < W * H; i++) {
+    const a = px[i * 4 + 3];
+    elev[i] = a ? (px[i * 4] * 256 + px[i * 4 + 1] + px[i * 4 + 2] / 256) - 32768 : 0;
+  }
+  // Terrain tiles are ~30 m at best; blur so slopes stay smooth on fine grids
+  const cellM = c * CIRC * Math.cos(my2lat(my0 + H * c / 2) * Math.PI / 180);
+  const rad = Math.max(1, Math.min(6, Math.round(40 / cellM)));
+  elev = boxBlur(boxBlur(elev, W, H, rad), W, H, rad);
+  return elev;
+}
+function boxBlur(src, W, H, r) {
+  const tmp = new Float32Array(W * H), out = new Float32Array(W * H);
+  for (let y = 0; y < H; y++) {
+    let acc = 0, cnt = 0; const row = y * W;
+    for (let x = -r; x < W + r; x++) {
+      if (x + r < W && x + r >= 0) { acc += src[row + x + r]; cnt++; }
+      if (x - r - 1 >= 0 && x - r - 1 < W) { acc -= src[row + x - r - 1]; cnt--; }
+      if (x >= 0 && x < W) tmp[row + x] = acc / cnt;
+    }
+  }
+  for (let x = 0; x < W; x++) {
+    let acc = 0, cnt = 0;
+    for (let y = -r; y < H + r; y++) {
+      if (y + r < H && y + r >= 0) { acc += tmp[(y + r) * W + x]; cnt++; }
+      if (y - r - 1 >= 0 && y - r - 1 < H) { acc -= tmp[(y - r - 1) * W + x]; cnt--; }
+      if (y >= 0 && y < H) out[y * W + x] = acc / cnt;
+    }
+  }
+  return out;
+}
+function hillshade(elev, grid) {
+  const { W, H, c, my0 } = grid;
+  const out = new Float32Array(W * H);
+  const az = 315 * Math.PI / 180, alt = 45 * Math.PI / 180, zf = 2.2;
+  const Lx = Math.sin(az) * Math.cos(alt), Ly = Math.cos(az) * Math.cos(alt), Lz = Math.sin(alt);
+  for (let y = 0; y < H; y++) {
+    const cm = c * CIRC * Math.cos(my2lat(my0 + (y + 0.5) * c) * Math.PI / 180);
+    const yn = Math.max(0, y - 1), ys = Math.min(H - 1, y + 1);
+    for (let x = 0; x < W; x++) {
+      const xw = Math.max(0, x - 1), xe = Math.min(W - 1, x + 1);
+      const dzdx = (elev[y * W + xe] - elev[y * W + xw]) / ((xe - xw) * cm || 1);
+      const dzdy = (elev[yn * W + x] - elev[ys * W + x]) / ((ys - yn) * cm || 1);
+      const nx = -zf * dzdx, ny = -zf * dzdy, nz = 1, nl = Math.hypot(nx, ny, nz);
+      out[y * W + x] = Math.max(0, (nx * Lx + ny * Ly + nz * Lz) / nl);
+    }
+  }
+  return out;
+}
+
+// ---------- run ----------
+let jobId = 0, worker = null, abortCtrl = null;
+const workerURL = URL.createObjectURL(new Blob([$("#worker-src").textContent], { type: "text/javascript" }));
+
+async function run() {
+  const job = ++jobId;
+  stopSweep();
+  if (worker) { worker.terminate(); worker = null; }
+  if (abortCtrl) abortCtrl.abort();
+  abortCtrl = new AbortController();
+  const signal = abortCtrl.signal;
+  const p = plan();
+  updatePlanNote();
+  ui.run.disabled = true;
+  const t0 = performance.now();
+  try {
+    setStatus(`Downloading ${DETAIL_LABEL[p.detail]} and water within ${Math.round(p.R)} km…`, 0.04);
+    const elevP = state.terrain ? loadElevation(p.grid, signal).catch(err => { if (err.name === "AbortError") throw err; return null; }) : Promise.resolve(null);
+    const buf = await fetchOsm(p.query, signal, got => {
+      if (job === jobId) setStatus(`Downloading ${DETAIL_LABEL[p.detail]} and water · ${(got / 1048576).toFixed(1)} MB`, Math.min(0.5, 0.05 + got / 4e7));
+    });
+    const elev = await elevP;
+    if (job !== jobId) return;
+    const shade = elev ? hillshade(elev, p.grid) : null;
+    const res = await new Promise((resolve, reject) => {
+      worker = new Worker(workerURL);
+      worker.onmessage = e => {
+        const m = e.data;
+        if (m.type === "progress") { if (job === jobId) setStatus(m.msg + "…", m.frac); }
+        else if (m.type === "error") reject(new Error(m.message));
+        else resolve(m);
+      };
+      worker.onerror = e => reject(new Error(e.message || "The routing worker crashed (often out of memory). Try a lower resolution or shorter time."));
+      const msg = {
+        buf: buf.slice(0), grid: p.grid, start: state.start, mode: state.mode, maxSec: state.maxMin * 60,
+        lastMileKmh: p.lastMile, offCapSec: state.offCap * 60, terrain: state.terrain, soften: state.soften,
+        elev: elev ? elev.slice() : null
+      };
+      worker.postMessage(msg, [msg.buf].concat(msg.elev ? [msg.elev.buffer] : []));
+    });
+    if (job !== jobId) return;
+    worker.terminate(); worker = null;
+    state.result = { T: res.T, grid: p.grid, bounds: p.bounds, shade, stats: res.stats, maxSec: state.maxMin * 60, mode: state.mode };
+    prepareRaster();
+    buildColors();
+    drawFull();
+    renderLegend();
+    if (needFit) { needFit = false; fitToReach(); }
+    const s = res.stats;
+    const secs = ((performance.now() - t0) / 1000).toFixed(1);
+    if (s.reached < 4) {
+      setStatus("Almost nothing was reachable from here. Move the start next to a road, or allow more off-network time.", 1, true);
+    } else {
+      setStatus(`Mapped ${state.maxMin} min by ${state.mode === "drive" ? "car" : state.mode === "bike" ? "bike" : "foot"} in ${secs} s. Hover the map for times.`, 1);
+    }
+    ui.stats.innerHTML = `${fmt(s.areaKm2)} km² reached · ${fmt(s.ways)} roads, ${fmt(s.nodes)} nodes, ${fmt(s.water)} water features · grid ${p.grid.W}×${p.grid.H}<br>Roads and water © OpenStreetMap contributors via Overpass. Terrain: AWS Terrain Tiles.`;
+    ui.play.disabled = false;
+  } catch (err) {
+    if (err.name === "AbortError" || job !== jobId) return;
+    setStatus(err.message || String(err), 0, true);
+  } finally {
+    if (job === jobId) ui.run.disabled = false;
+  }
+}
+const fmt = n => Math.round(n).toLocaleString();
+let needFit = true;
+function fitToReach() {
+  const { T, grid } = state.result; const { mx0, my0, c, W, H } = grid;
+  let x0 = W, x1 = -1, y0 = H, y1 = -1;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (T[y * W + x] !== Infinity) {
+    if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+  }
+  if (x1 < 0) return;
+  const b = L.latLngBounds([my2lat(my0 + (y1 + 1) * c), mx2lon(mx0 + x0 * c)], [my2lat(my0 + y0 * c), mx2lon(mx0 + (x1 + 1) * c)]);
+  const panel = document.querySelector(".panel").getBoundingClientRect();
+  const phone = innerWidth <= 640;
+  map.fitBounds(b, {
+    paddingTopLeft: phone ? [16, 16] : [panel.right + 16, 16],
+    paddingBottomRight: phone ? [16, innerHeight - panel.top + 16] : [16, 16]
+  });
+}
+
+// ---------- rendering ----------
+let raster = null; // { w, h, s, upT (Float32), shadeUp (Uint8), base, glow, empty (Uint32) }
+function prepareRaster() {
+  const { T, grid, shade } = state.result; const { W, H } = grid;
+  const s = Math.max(1, Math.min(4, Math.round(1800 / Math.max(W, H))));
+  const w = W * s, h = H * s;
+  const upT = new Float32Array(w * h), shadeUp = shade ? new Uint8Array(w * h) : null;
+  for (let py = 0; py < h; py++) {
+    let gy = (py + 0.5) / s - 0.5; if (gy < 0) gy = 0; if (gy > H - 1) gy = H - 1;
+    const y0 = Math.floor(gy), y1 = Math.min(H - 1, y0 + 1), fy = gy - y0;
+    for (let px = 0; px < w; px++) {
+      let gx = (px + 0.5) / s - 0.5; if (gx < 0) gx = 0; if (gx > W - 1) gx = W - 1;
+      const x0 = Math.floor(gx), x1 = Math.min(W - 1, x0 + 1), fx = gx - x0;
+      const a = T[y0 * W + x0], b = T[y0 * W + x1], cc = T[y1 * W + x0], d = T[y1 * W + x1];
+      let v;
+      if (a !== Infinity && b !== Infinity && cc !== Infinity && d !== Infinity) {
+        v = (a * (1 - fx) + b * fx) * (1 - fy) + (cc * (1 - fx) + d * fx) * fy;
+      } else {
+        v = fx < 0.5 ? (fy < 0.5 ? a : cc) : (fy < 0.5 ? b : d);
+      }
+      const i = py * w + px;
+      upT[i] = v;
+      if (shadeUp) {
+        const sa = shade[y0 * W + x0], sb = shade[y0 * W + x1], sc = shade[y1 * W + x0], sd = shade[y1 * W + x1];
+        shadeUp[i] = Math.round(255 * ((sa * (1 - fx) + sb * fx) * (1 - fy) + (sc * (1 - fx) + sd * fx) * fy));
+      }
+    }
+  }
+  const canvas = document.createElement("canvas"); canvas.width = w; canvas.height = h;
+  raster = { w, h, s, upT, shadeUp, canvas, ctx: canvas.getContext("2d"), img: null };
+  raster.img = raster.ctx.createImageData(w, h);
+  if (overlay) map.removeLayer(overlay);
+  overlay = new CanvasOverlay(canvas, state.result.bounds, { pane: "bands", opacity: state.opacity, interactive: false }).addTo(map);
+}
+
+const hex = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+function paletteAt(t) {
+  const stops = PALETTES[state.palette].map(hex);
+  const x = Math.max(0, Math.min(1, t)) * (stops.length - 1);
+  const i = Math.min(stops.length - 2, Math.floor(x)), f = x - i;
+  return stops[i].map((v, k) => v + (stops[i + 1][k] - v) * f);
+}
+function bandCount() { return Math.ceil(state.result.maxSec / (state.interval * 60) - 1e-9); }
+function bandColors() {
+  const n = bandCount(); const out = [];
+  for (let i = 0; i < n; i++) out.push(paletteAt(n === 1 ? 0 : i / (n - 1)));
+  return out;
+}
+const pack = (r, g, b, a) => ((a << 24) | (b << 16) | (g << 8) | r) >>> 0;
+function buildColors() {
+  const { w, h, upT, shadeUp } = raster;
+  const step = state.interval * 60, cols = bandColors(), n = cols.length;
+  const band = new Int16Array(w * h);
+  for (let i = 0; i < w * h; i++) { const t = upT[i]; band[i] = t === Infinity ? -1 : Math.min(n - 1, Math.floor(t / step)); }
+  const base = new Uint32Array(w * h), glow = new Uint32Array(w * h), empty = new Uint32Array(w * h);
+  const lineDark = isDark() ? 0.45 : 0.62;
+  const fadeW = Math.max(1, Math.min(w, h) * 0.12);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = y * w + x, b = band[i];
+    const sh = shadeUp ? shadeUp[i] / 255 : 0.707;
+    // outside the reach only terrain shadows remain, fading out toward the edge of the downloaded area
+    const fade = Math.min(1, Math.min(x, y, w - 1 - x, h - 1 - y) / fadeW);
+    if (b < 0) {
+      const a = shadeUp ? Math.max(0, Math.min(150, (0.72 - sh) * 260 * fade)) : 0;
+      empty[i] = base[i] = glow[i] = pack(16, 20, 28, a | 0);
+      continue;
+    }
+    const edge = (x + 1 < w && band[i + 1] !== b) || (y + 1 < h && band[i + w] !== b) ||
+                 (x > 0 && band[i - 1] < 0) || (y > 0 && band[i - w] < 0);
+    let m = 0.58 + 0.6 * sh;
+    if (edge) m *= lineDark;
+    const col = cols[b];
+    const r = Math.min(255, col[0] * m), g = Math.min(255, col[1] * m), bl = Math.min(255, col[2] * m);
+    base[i] = pack(r | 0, g | 0, bl | 0, 255);
+    glow[i] = pack((r + (255 - r) * 0.7) | 0, (g + (255 - g) * 0.7) | 0, (bl + (255 - bl) * 0.7) | 0, 255);
+    const ea = shadeUp ? Math.max(0, Math.min(150, (0.72 - sh) * 260 * fade)) : 0;
+    empty[i] = pack(16, 20, 28, ea | 0);
+  }
+  Object.assign(raster, { base, glow, empty });
+}
+function drawFull() {
+  const px = new Uint32Array(raster.img.data.buffer);
+  px.set(raster.base);
+  raster.ctx.putImageData(raster.img, 0, 0);
+}
+function drawSweep(cur) {
+  const { upT, base, glow, empty } = raster;
+  const px = new Uint32Array(raster.img.data.buffer);
+  const front = Math.max(30, state.interval * 60 * 0.35);
+  for (let i = 0, n = upT.length; i < n; i++) {
+    const t = upT[i];
+    px[i] = t > cur ? empty[i] : (t > cur - front ? glow[i] : base[i]);
+  }
+  raster.ctx.putImageData(raster.img, 0, 0);
+}
+
+let sweeping = false, sweepRAF = 0;
+function startSweep() {
+  if (!raster) return;
+  sweeping = true; ui.play.textContent = "■ Stop";
+  const dur = matchMedia("(prefers-reduced-motion: reduce)").matches ? 1 : 9000;
+  const max = state.result.maxSec; const t0 = performance.now();
+  const tick = now => {
+    const f = Math.min(1, (now - t0) / dur);
+    const cur = max * f;
+    drawSweep(cur);
+    setStatus(`Sweep · ${Math.floor(cur / 60)} min`, f);
+    if (f < 1 && sweeping) sweepRAF = requestAnimationFrame(tick);
+    else { stopSweep(); setStatus(`Sweep finished at ${state.maxMin} min.`, 1); }
+  };
+  sweepRAF = requestAnimationFrame(tick);
+}
+function stopSweep() {
+  if (!sweeping) return;
+  sweeping = false; cancelAnimationFrame(sweepRAF); ui.play.textContent = "▶ Sweep";
+  if (raster && raster.base) drawFull();
+}
+
+function renderLegend() {
+  const cols = bandColors(), n = cols.length;
+  const strip = $("#legend-strip"), ticks = $("#legend-ticks");
+  strip.innerHTML = ""; ticks.innerHTML = "";
+  cols.forEach((c, i) => {
+    const sp = document.createElement("span");
+    sp.style.background = `rgb(${c.map(Math.round).join(",")})`;
+    sp.title = `${i * state.interval}–${Math.min(state.result.maxSec / 60, (i + 1) * state.interval)} min`;
+    strip.appendChild(sp);
+  });
+  const every = Math.max(1, Math.ceil(n / 6));
+  const lastRegular = Math.floor(n / every) * every;
+  const dropLast = lastRegular !== n && n - lastRegular < every * 0.75; // keep the end label from colliding
+  for (let i = 0; i <= n; i += every) {
+    if (dropLast && i === lastRegular && i !== 0) continue;
+    const sp = document.createElement("span");
+    sp.style.left = (i / n * 100) + "%";
+    sp.textContent = i === n ? `${state.result.maxSec / 60} min` : String(i * state.interval);
+    ticks.appendChild(sp);
+  }
+  if (n % every !== 0) {
+    const sp = document.createElement("span"); sp.style.left = "100%"; sp.textContent = `${state.result.maxSec / 60} min`; ticks.appendChild(sp);
+  }
+  $("#legend").hidden = false;
+}
+
+// hover readout
+map.on("mousemove", e => {
+  const r = state.result;
+  if (!r) return;
+  const { mx0, my0, c, W, H } = r.grid;
+  const gx = Math.floor((lon2mx(e.latlng.lng) - mx0) / c), gy = Math.floor((lat2my(e.latlng.lat) - my0) / c);
+  let txt = null;
+  if (gx >= 0 && gy >= 0 && gx < W && gy < H) {
+    const t = r.T[gy * W + gx];
+    txt = t === Infinity ? `over ${r.maxSec / 60} min` : `${(t / 60).toFixed(t < 600 ? 1 : 0)} min`;
+  }
+  if (!txt) { ui.readout.hidden = true; return; }
+  ui.readout.textContent = txt;
+  ui.readout.style.left = e.originalEvent.clientX + "px";
+  ui.readout.style.top = e.originalEvent.clientY + "px";
+  ui.readout.hidden = false;
+});
+map.on("mouseout", () => { ui.readout.hidden = true; });
+
+run();
+</script>
+</body>
+</html>
